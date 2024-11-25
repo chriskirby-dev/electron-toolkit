@@ -1,0 +1,3 @@
+[submodule "vendor/windows-koffi"]
+	path = vendor/windows-koffi
+	url = https://github.com/chriskirby-dev/windows-koffi.git
