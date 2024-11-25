@@ -1,0 +1,11 @@
+{
+  "name": "electron-toolkit",
+  "version": "1.0.0",
+  "description": "Helpers and base. classes extending or. adding functionality to the electron could be a code base.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Chris Kirby",
+  "license": "ISC"
+}
