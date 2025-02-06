@@ -68,3 +68,5 @@ class FluxVisual {
         document.body.appendChild(highlight);
     }
 }
+
+export default FluxVisual;

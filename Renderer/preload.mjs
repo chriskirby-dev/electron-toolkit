@@ -1,5 +1,5 @@
 import fs from "fs";
-
+import EventEmitter from "events";
 import { contextBridge, ipcRenderer } from "electron";
 import Inspect from "./inspect.mjs";
 import Visual from "./visual.mjs";
@@ -9,7 +9,8 @@ const __dirname = import.meta.url.substring(8, import.meta.url.lastIndexOf("/"))
 const root = __dirname.split("/").slice(0, -3).join("/");
 
 //Initialize flux global object
-const flux = (window.flux = { args: {} });
+const flux = (window.flux = new EventEmitter());
+flux.args = {};
 
 window.process.argv.map((arg) => {
     if (arg.includes("=")) {
@@ -31,8 +32,7 @@ const windowLoaded = new Promise((resolve) => {
 
 ipcRenderer.on("identifiers", (e, identifiers) => {
     console.log("identifiers", identifiers);
-    window.flux.frame = identifiers;
-    flux.frame = identifiers;
+    window.flux.frame = flux.frame = identifiers;
 });
 
 window.addEventListener("contextmenu", (e) => {

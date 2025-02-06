@@ -52,7 +52,6 @@ class Inspect {
      * @returns {Object} Element metrics
      */
     static element(selector) {
-
         const element = typeof selector == "string" ? document.querySelector(selector) : selector;
         if (!element.getBoundingClientRect) {
             return;
@@ -224,16 +223,16 @@ class Inspect {
                     break getSelector;
                 }
             }
-        }
 
-        // Check parent for similar siblings
-        const siblings = Array.from(element.parentNode.children);
-        const similarSiblings = siblings.filter((sibling) => sibling.tagName === element.tagName);
+            // Check parent for similar siblings
+            const _siblings = Array.from(element.parentNode.children);
+            const similarSiblings = _siblings.filter((sibling) => sibling.tagName === element.tagName);
 
-        if (similarSiblings.length > 1) {
-            const index = similarSiblings.indexOf(element) + 1;
-            selector = `${element.tagName}:nth-child(${index})`;
-            break getSelector;
+            if (similarSiblings.length > 1) {
+                const index = similarSiblings.indexOf(element) + 1;
+                selector = `${element.tagName}:nth-child(${index})`;
+                break getSelector;
+            }
         }
 
         // Use :is() pseudo-class with tag name and attributes
@@ -242,6 +241,7 @@ class Inspect {
             .map((attr) => (["id", "class"].includes(attr.name) ? `[${attr.name}="${attr.value}"]` : ""))
             .join("");
         selector = `${tag}${attributes}`;
+
         let current = element;
         while (current.parentNode && document.querySelectorAll(selector).length > 1) {
             selector = this.getSelector(current.parentNode, selector);
