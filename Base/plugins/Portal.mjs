@@ -30,11 +30,8 @@ export function install(window) {
     });
 
     window.inject(`
-        if(!flux?.ipcRenderer){
-            const electron = import('electron');
-            flux.ipcRenderer = electron.ipcRenderer;
-        }
-        const { ipcRenderer } = flux;
+      
+        const { ipc } = flux;
 
         function sendMessage( ...args ){
             if(args.length == 1){
@@ -60,14 +57,14 @@ export function install(window) {
             }
         }
 
-        ipcRenderer.on('portal:request', (event) => {
+        ipc.on('portal:request', (event) => {
             const channel = new MessageChannel();
             channel.port1.onmessage = onMessage;
             channel.port1.postMessage('portal:created', [channel.port2]);
             flux.send = sendMessage;
         });
 
-        ipcRenderer.on('portal:created', (event) => {
+        ipc.on('portal:created', (event) => {
             const [ port ] = event.ports;
             port.onmessage = onMessage;
             port.postMessage({

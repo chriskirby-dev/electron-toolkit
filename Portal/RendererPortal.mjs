@@ -36,7 +36,12 @@ export class RendererPortal extends EventEmitter {
         // The only difference between port1 and port2 is in how you use them. Messages
         // sent to port1 will be received by port2 and vice-versa.
 
-        ipcRenderer.on("protal:created", () => {});
+        ipcRenderer.on("protal:created", (e) => {
+            this.local = e.ports[0];
+            this.local.onmessage = this.onMessage.bind(this);
+
+            this.ready = true;
+        });
 
         ipcRenderer.on("protal:request", () => {
             const channel = new MessageChannel();

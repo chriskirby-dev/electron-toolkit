@@ -1,12 +1,24 @@
 import fs from "node:fs";
+import FS from "../FileSystem/FS.mjs";
 import path from "path";
 import * as url from "url";
+import os from "os";
+import crypto from "crypto";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = url.fileURLToPath(new URL(".", import.meta.url));
 
+const toolkitPath = path.resolve(__dirname, "../../..");
 const DEFAULT_PRELOAD = path.resolve(__dirname, "../Renderer/preload.mjs");
 const DEFAULT_HOMEPAGE = path.resolve(__dirname, "../views/default.html");
+
+let tmp = os.tmpdir().replace(/\\/g, "/");
+const TMP_DIR = path.join(tmp, "electron-toolkit");
+if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR);
+
+const JUICE_PATH = "file:///" + path.resolve(__dirname, "../../").replace(/\\/g, "/");
+
+FS.Directory.empty(TMP_DIR);
 
 const electronBrowserWindowOptions = [
     "width",
@@ -119,15 +131,15 @@ const DEFAULT_OPTIONS = {
     y: 0,
     webPreferences: {
         nodeIntegration: true,
-        contextIsolation: false,
+        contextIsolation: true,
+        enableRemoteModule: false,
         preload: DEFAULT_PRELOAD,
     },
 };
-
 function buildPreload(contents) {
     const urlPattern = /^(https?:\/\/|\/\/|\/|\.\.?\/|[a-zA-Z]:\\|file:\/\/)/;
 
-    return contents
+    let code = contents
         .map((source) => {
             if (urlPattern.test(source)) {
                 try {
@@ -141,23 +153,58 @@ function buildPreload(contents) {
             }
         })
         .join("\n");
+
+    const { imports, cleanedCode } = extractAndRemoveImports(code);
+
+    const updatedImports = imports
+        .join("\n")
+        .replace(/(JUICE_PATH)/g, JUICE_PATH)
+        .replace(/(ROOT_DIR)/g, process.cwd().replace(/\\/g, "/"));
+
+    //console.log(updatedImports);
+
+    return (
+        updatedImports +
+        cleanedCode.replace(/(JUICE_PATH)/g, JUICE_PATH).replace(/(ROOT_DIR)/g, process.cwd().replace(/\\/g, "/"))
+    );
 }
 
-function mergeOptions(keys, options, defaults) {
+function extractAndRemoveImports(code) {
+    const importRegex = /^import\s+[^;]+;/gm; // Matches full import statements
+
+    // Extract imports
+    const imports = code.match(importRegex) || [];
+
+    // Remove imports from the original code
+    const cleanedCode = code.replace(importRegex, "").trim();
+
+    return { imports, cleanedCode };
+}
+
+function mergeOptions(keys, options = {}, defaults) {
     return keys.reduce((acc, key) => {
         if (key === "preload") {
             const ploads = Array.isArray(options[key]) ? options[key] : [options[key] || ""];
             if (!ploads.includes(DEFAULT_PRELOAD)) {
-                ploads.push(DEFAULT_PRELOAD);
+                ploads.unshift(DEFAULT_PRELOAD);
             }
-            console.log(ploads);
+            ploads.push(`ipcRenderer.send("preloaded");`);
+            //  console.log("preloads", ploads);
             options[key] = ploads;
-            console.log(buildPreload(ploads));
-            acc[key] = `data:text/javascript;base64,${Buffer.from(buildPreload(ploads)).toString("base64")}`;
+            const preloadScript = buildPreload(ploads);
+            const hash = crypto.createHash("sha256");
+            hash.update(preloadScript);
+            const hex = hash.digest("hex");
+            const preloadPath = path.join(TMP_DIR, `preload-${hex}.mjs`);
+            if (!fs.existsSync(preloadPath)) {
+                fs.writeFileSync(preloadPath, preloadScript);
+            }
+            //acc[key] = `data:text/javascript;base64,${Buffer.from(buildPreload(ploads)).toString("base64")}`;
+            acc[key] = preloadPath;
             return acc;
         }
         if (key === "webPreferences") {
-            acc[key] = mergeOptions(electronWebPreferencesOptions, options[key], defaults[key]);
+            acc[key] = mergeOptions(electronWebPreferencesOptions, options[key] || {}, defaults[key]);
             return acc;
         }
         if (options[key] !== undefined) {

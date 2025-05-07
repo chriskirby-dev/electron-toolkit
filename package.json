@@ -10,6 +10,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "chrome-remote-interface": "^0.33.3",
     "electron": "^33.2.0"
   }
 }

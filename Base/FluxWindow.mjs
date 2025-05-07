@@ -3,7 +3,7 @@ import path from "path";
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = url.fileURLToPath(new URL(".", import.meta.url));
 import { extractOptions } from "./BrowserOptions.mjs";
-import { app, MessageChannelMain, WebContentsView } from "electron";
+import { app, MessageChannelMain, BrowserWindow } from "electron";
 import { createDelay } from "../../../../../js/juice/Util/Timers.mjs";
 import Content from "../../../../../js/juice/HTML/Content.mjs";
 import DevTools from "../DevTools/WebContentsDevTools.mjs";
@@ -12,11 +12,11 @@ const DEFAULT_HOMEPAGE = path.resolve(__dirname, "../views/default.html");
 const DEFAULT_PRELOAD = path.resolve(__dirname, "../Renderer/preload.mjs");
 const PLUGINS_DIR = path.resolve(__dirname, "./plugins");
 
-class FluxBaseView extends WebContentsView {
+class FluxWindow extends BrowserWindow {
     frameSize = 0;
     ipc;
     views = [];
-    _plugins = [];
+    plugins = [];
 
     static preloads = [DEFAULT_PRELOAD];
     static appliedOptionsBase = [
@@ -30,7 +30,7 @@ class FluxBaseView extends WebContentsView {
         "x",
         "y",
     ];
-    static appliedOptions = [];
+    static appliedOptions = ["cdp"];
     static instances = [];
 
     _width = 800;
@@ -41,7 +41,7 @@ class FluxBaseView extends WebContentsView {
     children = [];
 
     static create(options) {
-        class ExtendedBrowserWindow extends FluxBaseView {
+        class ExtendedBrowserWindow extends FluxWindow {
             static appliedOptions = options.appliedOptions || [];
             static plugins = options.plugins || [];
         }
@@ -66,7 +66,6 @@ class FluxBaseView extends WebContentsView {
         console.log("browserOptions", browserOptions);
         super(browserOptions, parent);
         this.delay = createDelay();
-        this.targetId = null;
         this.name = name;
         this.parent = parent;
         this.setOptions(options);
@@ -108,14 +107,8 @@ class FluxBaseView extends WebContentsView {
         }
     }
 
-    setParent(parent) {
-        this.parent = parent;
-        this.parentIndex = this.parent.children.length;
-        this.parent.children.push(this);
-    }
-
     get address() {
-        return this.parent.address + ":" + this.parentIndex;
+        return this.address;
     }
 
     get static() {
@@ -136,7 +129,7 @@ class FluxBaseView extends WebContentsView {
 
     set x(x) {
         this._x = x - this.frameSize;
-        this.delay(10, "bounds").then(() => this.windowChange({}));
+        this.delay(10, "bounds").then(() => this.setPosition(this._x, this._y));
     }
 
     get y() {
@@ -145,7 +138,7 @@ class FluxBaseView extends WebContentsView {
 
     set y(y) {
         this._y = y - this.frameSize;
-        this.delay(10, "bounds").then(() => this.windowChange({}));
+        this.delay(10, "bounds").then(() => this.setPosition(this._x, this._y));
     }
 
     get width() {
@@ -154,7 +147,7 @@ class FluxBaseView extends WebContentsView {
 
     set width(width) {
         this._width = width + this.frameSize * 2;
-        this.delay(10, "bounds").then(() => this.windowChange({}));
+        this.delay(10, "bounds").then(() => this.setSize(this._width, this._height));
     }
 
     get height() {
@@ -163,13 +156,12 @@ class FluxBaseView extends WebContentsView {
 
     set height(height) {
         this._height = height + this.frameSize * 2;
-        this.delay(10, "bounds").then(() => this.windowChange({}));
+        this.delay(10, "bounds").then(() => this.setSize(this._width, this._height));
     }
 
     windowChange({ x = this._x, y = this._y, width = this._width, height = this._height } = {}) {
         console.log("windowChange", { x, y, width, height });
         this.bounds = { x, y, width, height };
-        this.setBounds(this.bounds);
         this.emit("window-change", this.bounds);
     }
 
@@ -216,19 +208,32 @@ class FluxBaseView extends WebContentsView {
             scope: "viewport",
         };
 
-        console.log("onFrameCreated", identifiers);
-
-        console.log(frame);
-
         setTimeout(() => frame.send("identifiers", identifiers), 100);
     }
 
     #onMove() {
-        this.bounds = this.getBounds();
+        const [x, y] = this.getPosition();
+        const { menubar, frameSize } = this.bounds;
+        this.bounds.x = x;
+        this.bounds.y = y;
+        this.bounds.content.x = x + frameSize;
+        this.bounds.content.y = y + menubar.height;
+        if (this.views && this.views.length) {
+            this.views.forEach((view) => view.onWindowMove(this.bounds));
+        }
     }
 
     #onResize() {
-        this.bounds = this.getBounds();
+        // console.log("RESIZE", this.views);
+        const [totalWidth, totalHeight] = this.getSize();
+        const [width, height] = this.getContentSize();
+        this.bounds.height = totalHeight;
+        this.bounds.width = totalWidth;
+        this.bounds.content.width = width;
+        this.bounds.content.height = height;
+        if (this.views && this.views) {
+            for (let view in this.views) this.views[view].onWindowResize(this.bounds);
+        }
     }
 
     inject(js) {
@@ -279,18 +284,7 @@ class FluxBaseView extends WebContentsView {
             `);
     }
 
-    injectJSRecursively(script, gesture = false, callback) {
-        this.frames.forEach((frame, i) => {
-            let inject = typeof script == "function" ? script(frame, i) : script;
-            frame.executeJavaScript(inject, gesture).then((resp) => {
-                if (callback) callback(frame, resp);
-                return resp;
-            });
-        });
-    }
-
     async loadPlugin(pluginName) {
-        console.log("loadPlugin", pluginName);
         const pluginPath =
             pluginName.startsWith("/") ||
             pluginName.startsWith("\\") ||
@@ -304,11 +298,10 @@ class FluxBaseView extends WebContentsView {
         if (plugin.install) plugin.install(this);
         console.log("Installed Plugin", pluginName);
         this.plugins.push(plugin);
-        return plugin;
     }
 
     loadFile(path, options) {
-        return this.webContents.loadFile(path, options);
+        return this.webContents.loadURL(path, options);
     }
 
     loadURL(url, options) {
@@ -316,36 +309,52 @@ class FluxBaseView extends WebContentsView {
         return this.webContents.loadURL(url, options);
     }
 
+    /*************  ✨ Codeium Command ⭐  *************/
+    /**
+     * Opens a Chrome Protocol DevTools window for this view.
+     *
+     * Automatically starts the Chrome Protocol if it is not already running.
+     *
+     * @returns {undefined}
+     */
+    /******  c8f8d478-cca2-486f-b560-0c5672ce12f1  *******/
     async openChromeProtocol() {
-        console.log("openChromeProtocol");
-        return this.startChromeProtocol(true);
-    }
-
-    async startChromeProtocol(open = false) {
         await FluxBaseView.whenReady();
-        console.log("startChromeProtocol");
-        this.devTools = new DevTools(this.webContents);
-        await this.devTools.isReady();
-        await this.devTools.attach();
-        if (open) this.devTools.cdp.open();
+        console.log("openChromeProtocol View Ready");
+        if (!this.chromeProtocol) this.chromeProtocol = new ChromeProtocol(this.webContents);
+        this.chromeProtocol.open();
+        this.chromeProtocol.on("connect", (client) => {
+            console.log("Recieved Connect Event");
+            const { vdom } = this.chromeProtocol;
+        });
     }
 
-    #initialize(options) {
+    async startChromeProtocol() {
+        await FluxBaseView.whenReady();
+        if (!this.chromeProtocol) this.chromeProtocol = new ChromeProtocol(this.webContents);
+        this.chromeProtocol.on("connect", (client) => {
+            //debug('Recieved Connect Event');
+            const { vdom } = this.chromeProtocol;
+        });
+    }
+
+    #initialize() {
         console.log("#init", this.constructor.name);
         this.windowChange = this.windowChange.bind(this);
-        const { parent } = this;
+        const { options, parent } = this;
+
+        if (this.debug) {
+            this.webContents.openDevTools({ mode: "detach" });
+        }
 
         if (this.template) {
             this.loadTemplate(this.template, this.tokens || {});
         }
 
-        let plugins = [].concat([this.static.plugins || [], this.plugins || [], options.plugins || []]);
-
-        if (plugins.length) {
-            plugins = plugins.map((plugin) => {
-                return this.loadPlugin(plugin);
+        if (this.static.plugins?.length) {
+            this.static.plugins.forEach((plugin) => {
+                this.loadPlugin(plugin);
             });
-            this.plugins = plugins;
         }
 
         this.webContents.mainFrame.ipc.on("portal-created", () => {});
@@ -393,15 +402,7 @@ class FluxBaseView extends WebContentsView {
 
         if (this.initialize) this.initialize();
 
-        this.loadFile(this.static.homepage || DEFAULT_HOMEPAGE).then(() => {
-            if (this.plugins.length) {
-                this.plugins.forEach((plugin) => {
-                    if (plugin.initialize) plugin.initialize(this);
-                });
-            }
-
-            this.emit("ready");
-        });
+        this.loadFile(this.static.homepage || DEFAULT_HOMEPAGE);
     }
 }
 

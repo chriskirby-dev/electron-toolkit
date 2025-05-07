@@ -53,9 +53,7 @@ class Inspect {
      */
     static element(selector) {
         const element = typeof selector == "string" ? document.querySelector(selector) : selector;
-        if (!element.getBoundingClientRect) {
-            return;
-        }
+        if (!element.getBoundingClientRect) return;
 
         const rect = element.getBoundingClientRect();
         const page = this.page();
@@ -75,6 +73,8 @@ class Inspect {
             text: element.textContent.trim().replace(/([\s]+)/g, " "),
             pageX: rect.left + page.scroll.x,
             pageY: rect.top + page.scroll.y,
+            centerX: rect.left + page.scroll.x + rect.width / 2,
+            centerY: rect.top + page.scroll.y + rect.height / 2,
             width: rect.width,
             height: rect.height,
             tagName: element.tagName.toLowerCase(),

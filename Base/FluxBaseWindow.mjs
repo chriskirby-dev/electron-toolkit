@@ -8,6 +8,9 @@ import delay from "../../../../../js/juice/Util/Timers.mjs";
 import Content from "../../../../../js/juice/HTML/Content.mjs";
 import FluxBaseView from "./FluxBaseView.mjs";
 
+import DevTools from "../DevTools/WebContentsDevTools.mjs";
+import ChromeProtocol from "../CDP/CDP.js";
+
 const DEFAULT_HOMEPAGE = path.resolve(__dirname, "../views/default.html");
 const DEFAULT_PRELOAD = path.resolve(__dirname, "../Renderer/preload.mjs");
 const PLUGINS_DIR = path.resolve(__dirname, "./plugins");
@@ -30,6 +33,8 @@ class FluxBaseWindow extends BaseWindow {
     };
 
     views = [];
+
+    children = [];
 
     constructor(options = {}) {
         super(options);
@@ -89,10 +94,10 @@ class FluxBaseWindow extends BaseWindow {
         this.setSize(this._width, this._height);
     }
 
-    addContentView(id, webContentsView, prefs = { nodeIntegration: false }) {
+    addContentView(id, view) {
         view.parent = this;
         this.views[id] = view;
-        super.setBrowserView({ view: webContentsView, webPreferences: prefs });
+        this.contentView.addChildView(view);
     }
 
     createContentView(id, options) {
@@ -148,25 +153,26 @@ class FluxBaseWindow extends BaseWindow {
         this.bounds.window.y = y;
         this.bounds.content.x = x + frameSize;
         this.bounds.content.y = y + menubar.height;
-        if (this.views.length) {
-            this.views.forEach((view) => view.onWindowMove(this.bounds));
+        if (this.views) {
+            Object.values(this.views).forEach((view) => view.onWindowMove && view.onWindowMove(this.bounds));
         }
     }
 
     #onResize() {
         const [totalWidth, totalHeight] = this.getSize();
         const [width, height] = this.getContentSize();
-        this.bounds.window.height = totalHeight;
-        this.bounds.window.width = totalWidth;
+
+        this.bounds.window.height = this._height = totalHeight;
+        this.bounds.window.width = this._width = totalWidth;
         this.bounds.content.width = width;
         this.bounds.content.height = height;
         if (this.views.length) {
-            this.views.forEach((view) => view.onWindowResize(this.bounds));
+            this.views.forEach((view) => view.onWindowResize && view.onWindowResize(this.bounds));
         }
     }
 
     onWindowResize() {
-        this.views.forEach((view) => view.onWindowResize());
+        this.views.forEach((view) => view.onWindowResize(this.bounds));
     }
 
     inject(js) {
@@ -182,17 +188,23 @@ class FluxBaseWindow extends BaseWindow {
             (function(){
                 alert('inject');
                 const script = document.createElement('script');
-                script.src = "${source}"
+                script.src = "${source}";
                 document.head.appendChild(script);
             })()
         `);
     }
 
     loadURL(url, options) {
-        return this.mainView.webContents.loadURL(url, options);
+        console.log("FluxWindow LOAD URL", url);
+        if (!this.mainView) return new Promise.resolve();
+        return this.mainView.loadURL(url, options);
     }
 
     loadFile(url, options) {
+        if (!this.mainView)
+            return new Promise((resolve, reject) => {
+                resolve();
+            });
         return this.mainView.webContents.loadFile(url, options);
     }
 
@@ -205,13 +217,13 @@ class FluxBaseWindow extends BaseWindow {
         const frameSize = (totalWidth - width) / 2;
         this.bounds = {
             window: {},
-            content: {},
+            content: { width },
             frameSize: frameSize,
             menubar: { height: totalHeight - height - frameSize },
             width: width,
         };
 
-        this.bounds.height = totalHeight - this.bounds.menubar.height;
+        this.bounds.content.height = totalHeight - this.bounds.menubar.height;
 
         this.windowChange = this.windowChange.bind(this);
         this.#onResize();
@@ -225,10 +237,11 @@ class FluxBaseWindow extends BaseWindow {
 
         this.on("close", () => {});
 
-        setTimeout(() => this.onInitializationComplete(), 100);
+        setTimeout(() => this.onInitializationComplete(options), 100);
     }
 
-    onInitializationComplete() {
+    onInitializationComplete(options) {
+        if (this.initialize) this.initialize(options);
         this.loadFile(this.static.homepage || DEFAULT_HOMEPAGE).then(() => {
             this.emit("ready");
         });
